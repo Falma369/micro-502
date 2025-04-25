@@ -14,29 +14,22 @@ def euler2rotmat(euler_angles):
     # Outputs:
     #           R: A 3x3 numpy array that represents the rotation matrix of the euler angles
     
-    # --- YOUR CODE HERE ---
-
-    # R_roll = 
-    # R_pitch = 
-    # R_yaw = 
-
-    # R =
 
     # --- SAMPLE SOLUTION ---
 
-    # R_roll = np.array([ [1, 0, 0], 
-    #                     [0, np.cos(euler_angles[0]), -np.sin(euler_angles[0])],
-    #                     [0, np.sin(euler_angles[0]), np.cos(euler_angles[0])]])
+    R_roll = np.array([ [1, 0, 0], 
+                        [0, np.cos(euler_angles[0]), -np.sin(euler_angles[0])],
+                        [0, np.sin(euler_angles[0]), np.cos(euler_angles[0])]])
     
-    # R_pitch = np.array([[np.cos(euler_angles[1]), 0, np.sin(euler_angles[1])],
-    #                     [0, 1, 0],
-    #                     [-np.sin(euler_angles[1]), 0, np.cos(euler_angles[1])]])
+    R_pitch = np.array([[np.cos(euler_angles[1]), 0, np.sin(euler_angles[1])],
+                        [0, 1, 0],
+                        [-np.sin(euler_angles[1]), 0, np.cos(euler_angles[1])]])
     
-    # R_yaw = np.array([ [np.cos(euler_angles[2]), -np.sin(euler_angles[2]), 0],
-    #                       [np.sin(euler_angles[2]), np.cos(euler_angles[2]), 0],
-    #                       [0, 0, 1]])
+    R_yaw = np.array([ [np.cos(euler_angles[2]), -np.sin(euler_angles[2]), 0],
+                       [np.sin(euler_angles[2]), np.cos(euler_angles[2]), 0],
+                       [0, 0, 1]])
     
-    # R = R_yaw @ R_pitch @ R_roll
+    R = R_yaw @ R_pitch @ R_roll
     
 
     return R
@@ -56,11 +49,11 @@ def quaternion2rotmat(quaternion):
         
         # --- SAMPLE SOLUTION ---
 
-        # x, y, z, w = quaternion
+        x, y, z, w = quaternion
         
-        # R = np.array([[1 - 2*y**2 - 2*z**2, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
-        #             [2*x*y + 2*z*w, 1 - 2*x**2 - 2*z**2, 2*y*z - 2*x*w],
-        #             [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x**2 - 2*y**2]])
+        R = np.array([[1 - 2*y**2 - 2*z**2, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
+                      [2*x*y + 2*z*w, 1 - 2*x**2 - 2*z**2, 2*y*z - 2*x*w],
+                      [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x**2 - 2*y**2]])
         
         return R
 

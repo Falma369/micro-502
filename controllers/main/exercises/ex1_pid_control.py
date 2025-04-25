@@ -3,11 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from lib.simple_pid import PID
 from scipy.spatial.transform import Rotation as R
+from exercises.ex0_rotations import euler2rotmat
 
 class quadrotor_controller():
     def __init__(self, exp_num):
         # Exercise 1: Choose what to tune ["vel_z", "pos_z", "vel_xy", "pos_xy"]
-        self.tuning_level = "off"
+        self.tuning_level = "off" # off
         
         # Only change the gains you are asked to, the others are already tuned by us (INITIAL GAINS)
         # gains = {
@@ -49,6 +50,10 @@ class quadrotor_controller():
                         "P_pos_xy": 1.5,    "I_pos_xy": 0.0,    "D_pos_xy": 0.0,
                         "P_vel_z": 7.0,     "I_vel_z": 0.0,     "D_vel_z": 2.0,
                         "P_vel_xy": 0.5,    "I_vel_xy": 0.0,    "D_vel_xy": 0.015,
+                        #"P_pos_z": 1.23,     "I_pos_z": 0.005,     "D_pos_z": 14.0,
+                        #"P_pos_xy": 2.0*alpha,    "I_pos_xy": 0.0*alpha,    "D_pos_xy": 2.0*alpha,
+                        #"P_vel_z": 7.0*alpha,     "I_vel_z": 0.5*alpha,     "D_vel_z": 2.0*alpha,
+                        #"P_vel_xy": 1.0*alpha,    "I_vel_xy": 0.07*alpha,    "D_vel_xy": 0.1*alpha,
                         "P_att_rp": 10.0,   "I_att_rp": 0.0,    "D_att_rp": 0.2,
                         "P_att_y": 4.0,     "I_att_y": 0.0,     "D_att_y": 0.3,
                         "P_rate_rp": 1.5,   "I_rate_rp":0.0,    "D_rate_rp": 0.1,
@@ -69,7 +74,7 @@ class quadrotor_controller():
 
         self.tuning_on = False
         self.tuning_start = 7
-        self.tuning_iter = 2
+        self.tuning_iter = 3
         self.tuning_time = 0.0
         self.tuning_ts = []
         self.tuning_desired = []
@@ -123,41 +128,57 @@ class quadrotor_controller():
             setpoint[1] = self.tuning(-3, 3, 5, dt, setpoint[1], sensor_data["y_global"], "y position [m]")
         if self.tuning_level == "pos_z":
             setpoint[2] = self.tuning(0.5, 1.5, 5, dt, setpoint[2], sensor_data["z_global"], "z position [m]")
+        if self.tuning_level == "pos_xy":
+            setpoint[1] = self.tuning(-3, 3, 5, dt, setpoint[1], sensor_data["y_global"], "y position [m]")
+        if self.tuning_level == "pos_z":
+            setpoint[2] = self.tuning(0.5, 1.5, 5, dt, setpoint[2], sensor_data["z_global"], "z position [m]")
+
         # Position error in inertial frame (use sensor_data["x_global"], sensor_data["y_global"], sensor_data["z_global"])
         pos_x_error = setpoint[0] - sensor_data["x_global"]
         pos_y_error = setpoint[1] - sensor_data["y_global"]
         pos_z_error = setpoint[2] - sensor_data["z_global"]
         yaw_setpoint = setpoint[3]
+
+        pos_error = np.array([pos_x_error, pos_y_error, pos_z_error])
+
         # Calculate rotation
-        R_current = R.from_quat([sensor_data["q_x"], sensor_data["q_y"], sensor_data["q_z"], sensor_data["q_w"]])
-        R_body_to_inertial = R_current.as_matrix()  # Rotation from body to inertial frame
-        R_inertial_to_body = R_body_to_inertial.T  # Inverse (transpose for rotation matrices)
+        euler_angles = np.array([sensor_data["roll"],sensor_data["pitch"],sensor_data["yaw"]])
+        R_inertial_to_body = (euler2rotmat(euler_angles)).T
+
         # Rotate position error into body frame
-        pos_error_inertial = np.array([pos_x_error, pos_y_error, pos_z_error])
-        pos_error_body = R_inertial_to_body @ pos_error_inertial  # Rotate into body frame
-        pos_x_error, pos_y_error, pos_z_error = pos_error_body
+        pos_error_body = R_inertial_to_body @ pos_error
+
         # Put setpoint of PID controller
-        self.pid_pos_x.setpoint = 0
-        self.pid_pos_y.setpoint = 0
-        self.pid_pos_z.setpoint = 0
+        self.pid_pos_x.setpoint = pos_error_body[0]
+        self.pid_pos_y.setpoint = pos_error_body[1]
+        self.pid_pos_z.setpoint = pos_error_body[2]
+
         # Call PID controller
-        vel_x_setpoint = self.pid_pos_x(-pos_x_error, dt=dt)
-        vel_y_setpoint = self.pid_pos_y(-pos_y_error, dt=dt)
-        vel_z_setpoint = self.pid_pos_z(-pos_z_error, dt=dt)
+        vel_x_setpoint = self.pid_pos_x(0, dt=dt)
+        vel_y_setpoint = self.pid_pos_y(0, dt=dt)
+        vel_z_setpoint = self.pid_pos_z(0, dt=dt)
+
         ### Velocity control loop ###
         # For tuning (use later)
         if self.tuning_level == "vel_xy":
             vel_y_setpoint = self.tuning(-self.limits["L_vel_xy"], self.limits["L_vel_xy"], 3, dt, vel_y_setpoint, sensor_data["v_y"], "y velocity [m/s]")
         if self.tuning_level == "vel_z":
             vel_z_setpoint = self.tuning(-self.limits["L_vel_z"], self.limits["L_vel_z"], 2, dt, vel_z_setpoint, sensor_data["v_z"], "z velocity [m/s]")
+
         # Put setpoint of PID controller
         self.pid_vel_x.setpoint = vel_x_setpoint
         self.pid_vel_y.setpoint = vel_y_setpoint
         self.pid_vel_z.setpoint = vel_z_setpoint
+
         # Call PID controller (use sensor_data["v_forward"], sensor_data["v_left"], sensor_data["v_up"])
         acc_x_setpoint = self.pid_vel_x(sensor_data["v_forward"], dt=dt)
         acc_y_setpoint = self.pid_vel_y(sensor_data["v_left"], dt=dt)
         acc_z_setpoint = self.pid_vel_z(sensor_data["v_up"], dt=dt)
+
+        # acc_x_setpoint = 0 # this line is just here so it doesn't throw an error
+        # acc_y_setpoint = 0 # this line is just here so it doesn't throw an error
+        # acc_z_setpoint = 0 # this line is just here so it doesn't throw an error
+        # yaw_setpoint = 0 # this line is just here so it doesn't throw an error
         return self.acceleration_and_yaw_to_pwm(dt, [acc_x_setpoint, acc_y_setpoint, acc_z_setpoint], yaw_setpoint, sensor_data)
         ### END EXERCISE 1 SOLUTION ###
     

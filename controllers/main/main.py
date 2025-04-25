@@ -3,6 +3,7 @@ import sys
 print("You are using python at this location:", sys.executable)
 
 import numpy as np
+import cv2
 from controller import Supervisor, Keyboard
 from exercises.ex1_pid_control import quadrotor_controller
 from exercises.ex2_kalman_filter import kalman_filter as KF
@@ -349,21 +350,21 @@ class CrazyflieInDroneDome(Supervisor):
         yaw_rate = 0.0
         key = self.keyboard.getKey()
         while key > 0:
-            if key == ord('W'):
+            if key == ord('Z'):
                 forward_velocity = 2.0
             elif key == ord('S'):
                 forward_velocity = -2.0
-            elif key == ord('A'):
+            elif key == ord('Q'):
                 left_velocity = 2.0
             elif key == ord('D'):
                 left_velocity = -2.0
-            elif key == ord('Q'):
+            elif key == ord('A'):
                 yaw_rate = 1.0
             elif key == ord('E'):
                 yaw_rate = -1.0
             elif key == ord('X'):
                 altitude_velocity = 0.3
-            elif key == ord('Z'):
+            elif key == ord('W'):
                 altitude_velocity = -0.3
             key = self.keyboard.getKey()
         return [forward_velocity, left_velocity, altitude_velocity, yaw_rate]
@@ -656,6 +657,11 @@ def path_planner_thread(drone):
 
             new_setpoint = assignment.get_command(sensor_data_copy, camera_data_copy, dt_planner)
             
+            camera_data = drone.read_camera()
+            if camera_data is not None:
+                cv2.imshow('ça marche?', camera_data)
+                cv2.waitKey(1) #wait for a key press
+
             with setpoint_lock:
                 current_setpoint = new_setpoint
 
@@ -734,7 +740,7 @@ if __name__ == '__main__':
                 if exp_num == 4:
                     # Track the progress of the drone through the assignment world
                     running = drone.track_assignment_progress(sensor_data)
-                    
+
                     # If the drone has completed the assignment, crash the drone
                     if not running:    
                         break

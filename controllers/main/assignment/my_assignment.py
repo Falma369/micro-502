@@ -22,6 +22,7 @@ import cv2
 # "q_w": W Quaternion value
 
 # A link to further information on how to access the sensor data on the Crazyflie hardware for the hardware practical can be found here: https://www.bitcraze.io/documentation/repository/crazyflie-firmware/master/api/logs/#stateestimate
+TOL = 0.15
 
 def get_command(sensor_data, camera_data, dt):
     # NOTE: Displaying the camera image with cv2.imshow() will throw an error because GUI operations should be performed in the main thread.
@@ -36,6 +37,8 @@ def get_command(sensor_data, camera_data, dt):
         get_command.lost_counter = 0
     if not hasattr(get_command, "search_yaw"):
         get_command.search_yaw = 0.0
+    if not hasattr(get_command, "goal_reached"):
+        get_command.goal_reached = False
     if not hasattr(get_command, "counter"):
         get_command.counter = 0
     if not hasattr(get_command, "actual_info"):
@@ -70,10 +73,22 @@ def get_command(sensor_data, camera_data, dt):
             if goal is not None and np.all(np.isfinite(goal)):
                 get_command.last_goal = goal
                 get_command.lost_counter = 0
+                get_command.goal_reached = False         # on a une nouvelle cible
             else:
                 get_command.lost_counter += 1
 
-    SEARCH_MODE = get_command.lost_counter >= 10      # 10 * ( counter%10 ⇒ ≈ 1 s )
+    SEARCH_MODE = (
+        get_command.goal_reached and             # on est arrivé
+        get_command.lost_counter >= 10           # …et on ne voit plus rien
+    )
+
+    if get_command.last_goal is not None:
+        dist_to_goal = np.linalg.norm(
+        np.array([sensor_data['x_global'],
+                  sensor_data['y_global'],
+                  sensor_data['z_global']]) - get_command.last_goal )
+        if dist_to_goal < TOL:
+            get_command.goal_reached = True
 
     if get_command.last_goal is not None and not SEARCH_MODE:
         # print(trapezes_centre)
@@ -88,11 +103,11 @@ def get_command(sensor_data, camera_data, dt):
         #     print('pas d obstacle en vue, je tourne')
         #     control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], adjusted_yaw]
     else:
-        DRIFT_SPEED = 0.3
-        YAW_STEP    = +0.05
-        get_command.search_yaw += YAW_STEP * dt
-
-        control_command = [sensor_data['x_global'], sensor_data['y_global'] + DRIFT_SPEED * dt, sensor_data['z_global'] + DRIFT_SPEED * dt, sensor_data['yaw'] + get_command.search_yaw]
+        DRIFT_SPEED = 0.05
+        DRIFT_SPEED_Z = 0.01
+        YAW_STEP    = 0.05
+        
+        control_command = [sensor_data['x_global'] + DRIFT_SPEED, sensor_data['y_global'] + DRIFT_SPEED, sensor_data['z_global'] + DRIFT_SPEED_Z, sensor_data['yaw'] + YAW_STEP]
 
     return control_command # Ordered as array with: [pos_x_cmd, pos_y_cmd, pos_z_cmd, yaw_cmd] in meters and radians
 

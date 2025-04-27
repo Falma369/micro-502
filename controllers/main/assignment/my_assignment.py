@@ -46,6 +46,7 @@ def get_command(sensor_data, camera_data, dt):
         get_command.start_position = np.array([sensor_data['x_global'], sensor_data['y_global'], sensor_data['z_global']])
 
     TOL = 0.1
+    GOAL_SPACEMENT = 0.8
     #MIN_MOVEMENT = 0.1
 
     pos = np.array([sensor_data['x_global'], sensor_data['y_global'], sensor_data['z_global']])
@@ -66,29 +67,37 @@ def get_command(sensor_data, camera_data, dt):
             #if movement > MIN_MOVEMENT:
             goal, yaw_correction = findGoal(get_command.previous_info, get_command.actual_info)
             get_command.last_yaw_correction = yaw_correction
+
             if goal is not None and np.all(np.isfinite(goal)):
-                #MARGIN = 0.3
-                is_new = True
+                updated = False
+                idx = 0
+                # is_new = True
                 for saved_goal in get_command.goals_list:
-                    if ((goal[0] - saved_goal[0]) < TOL) and ((goal[1] - saved_goal[1]) < TOL) and ((goal[2] - saved_goal[2]) < TOL):
-                        is_new = False
+                    dist_between_goals = goal - saved_goal
+                    if (np.abs(dist_between_goals[0]) < GOAL_SPACEMENT) and (np.abs(dist_between_goals[1]) < GOAL_SPACEMENT) and (np.abs(dist_between_goals[2]) < GOAL_SPACEMENT):
+                        get_command.goals_list[idx] = goal
+                        print('Goal updated with new position: ', goal)
+                        updated = True
                         break
-                if is_new:
+                    idx += 1
+
+                if not updated:
                     get_command.goals_list.append(goal)
-                    print(f"New goal stored: {goal}")
-                    get_command.last_goal = goal
-                    get_command.goal_reached = False
+                    print('New goal stored: ', goal)
+
+                get_command.last_goal = goal
+                get_command.goal_reached = False
 
     if get_command.mode == "exploration":
         if get_command.last_goal is not None:
             dist = pos - get_command.last_goal
-            if (dist[0] < TOL) and (dist[1] < TOL) and (dist[2] < TOL):
-                print("Goal reached!")
+            if (np.abs(dist[0])< TOL) and (np.abs(dist[1]) < TOL) and (np.abs(dist[2]) < TOL):
+                print("Goal reached!, distance: ", dist)
                 get_command.goal_reached = True
 
         if get_command.last_goal is not None and not get_command.goal_reached:
-            adjusted_yaw = sensor_data['yaw'] + get_command.last_yaw_correction
-            control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], adjusted_yaw]
+            #adjusted_yaw = sensor_data['yaw'] + get_command.last_yaw_correction
+            control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], get_command.last_yaw_correction]
         else:
             # Drift to search
             DRIFT_SPEED = 0.05
@@ -103,7 +112,7 @@ def get_command(sensor_data, camera_data, dt):
 
     elif get_command.mode == "navigate":
         dist = pos - get_command.start_position
-        if (dist[0] < TOL) and (dist[1] < TOL) and (dist[2] < TOL):
+        if (np.abs(dist[0]) < TOL) and (np.abs(dist[1]) < TOL) and (np.abs(dist[2]) < TOL):
             print("Back to start!")
             control_command = [pos[0], pos[1], pos[2], sensor_data['yaw']]
         else:

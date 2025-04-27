@@ -91,13 +91,27 @@ def get_command(sensor_data, camera_data, dt):
     if get_command.mode == "exploration":
         if get_command.last_goal is not None:
             dist = pos - get_command.last_goal
+
+            desired_yaw = np.arctan2(get_command.last_goal[1] - pos[1], get_command.last_goal[0] - pos[0])
+            #yaw_error = desired_yaw - sensor_data['yaw']
+            #yaw_error = (yaw_error + np.pi) % (2 * np.pi) - np.pi
+
+            #YAW_TOL = 0.1
+
             if (np.abs(dist[0])< TOL) and (np.abs(dist[1]) < TOL) and (np.abs(dist[2]) < TOL):
                 print("Goal reached!, distance: ", dist)
                 get_command.goal_reached = True
+                control_command = [pos[0], pos[1], pos[2], desired_yaw]
+                get_command.last_goal = None
 
-        if get_command.last_goal is not None and not get_command.goal_reached:
-            #adjusted_yaw = sensor_data['yaw'] + get_command.last_yaw_correction
-            control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], get_command.last_yaw_correction]
+            #elif np.abs(yaw_error) > YAW_TOL:
+            #    # Si on n'est pas encore bien orienté : corriger le yaw
+            #    YAW_CORRECTION_SPEED = 0.3  # rad/s, ajuste si nécessaire
+            #    control_command = [pos[0], pos[1], pos[2], sensor_data['yaw'] + np.sign(yaw_error) * YAW_CORRECTION_SPEED]
+
+            else:
+                #adjusted_yaw = sensor_data['yaw'] + get_command.last_yaw_correction
+                control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], desired_yaw]
         else:
             # Drift to search
             DRIFT_SPEED = 0.05

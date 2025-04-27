@@ -45,13 +45,13 @@ def get_command(sensor_data, camera_data, dt):
     if not hasattr(get_command, "start_position"):
         get_command.start_position = np.array([sensor_data['x_global'], sensor_data['y_global'], sensor_data['z_global']])
 
-    TOL = 0.15
-    MIN_MOVEMENT = 0.1
+    TOL = 0.1
+    #MIN_MOVEMENT = 0.1
 
     pos = np.array([sensor_data['x_global'], sensor_data['y_global'], sensor_data['z_global']])
 
     get_command.counter += 1
-    if get_command.counter % 10 == 0:
+    if get_command.counter % 30 == 0:
         get_command.counter = 0
         # Sauvegarder l'ancienne info
         get_command.previous_info = get_command.actual_info
@@ -62,31 +62,33 @@ def get_command(sensor_data, camera_data, dt):
         }
 
         if get_command.mode == "exploration" and get_command.previous_info is not None and get_command.goal_reached:
-            movement = np.linalg.norm(get_command.actual_info["drone_position"] - get_command.previous_info["drone_position"])
-            if movement > MIN_MOVEMENT:
-                goal, yaw_correction = findGoal(get_command.previous_info, get_command.actual_info)
-                if goal is not None and np.all(np.isfinite(goal)):
-                    MARGIN = 0.5
-                    is_new = True
-                    for saved_goal in get_command.goals_list:
-                        if np.linalg.norm(goal - saved_goal) < MARGIN:
-                            is_new = False
-                            break
-                    if is_new:
-                        get_command.goals_list.append(goal)
-                        print(f"New goal stored: {goal}")
-                        get_command.last_goal = goal
-                        get_command.goal_reached = False
+            #movement = np.linalg.norm(get_command.actual_info["drone_position"] - get_command.previous_info["drone_position"])
+            #if movement > MIN_MOVEMENT:
+            goal, yaw_correction = findGoal(get_command.previous_info, get_command.actual_info)
+            get_command.last_yaw_correction = yaw_correction
+            if goal is not None and np.all(np.isfinite(goal)):
+                #MARGIN = 0.3
+                is_new = True
+                for saved_goal in get_command.goals_list:
+                    if ((goal[0] - saved_goal[0]) < TOL) and ((goal[1] - saved_goal[1]) < TOL) and ((goal[2] - saved_goal[2]) < TOL):
+                        is_new = False
+                        break
+                if is_new:
+                    get_command.goals_list.append(goal)
+                    print(f"New goal stored: {goal}")
+                    get_command.last_goal = goal
+                    get_command.goal_reached = False
 
     if get_command.mode == "exploration":
         if get_command.last_goal is not None:
-            dist = np.linalg.norm(pos - get_command.last_goal)
-            if dist < TOL:
+            dist = pos - get_command.last_goal
+            if (dist[0] < TOL) and (dist[1] < TOL) and (dist[2] < TOL):
                 print("Goal reached!")
                 get_command.goal_reached = True
 
         if get_command.last_goal is not None and not get_command.goal_reached:
-            control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], sensor_data['yaw']]
+            adjusted_yaw = sensor_data['yaw'] + get_command.last_yaw_correction
+            control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], adjusted_yaw]
         else:
             # Drift to search
             DRIFT_SPEED = 0.05
@@ -94,14 +96,14 @@ def get_command(sensor_data, camera_data, dt):
             YAW_STEP = 0.05
             control_command = [pos[0] + DRIFT_SPEED, pos[1] + DRIFT_SPEED, pos[2] + DRIFT_SPEED_Z, sensor_data['yaw'] + YAW_STEP]
 
-        if len(get_command.goals_list) >= 5:
+        if len(get_command.goals_list) >= 5 and get_command.goal_reached:
             print("5 goals found. Switching to navigate mode.")
             get_command.mode = "navigate"
             get_command.last_goal = get_command.start_position
 
     elif get_command.mode == "navigate":
-        dist = np.linalg.norm(pos - get_command.start_position)
-        if dist < TOL:
+        dist = pos - get_command.start_position
+        if (dist[0] < TOL) and (dist[1] < TOL) and (dist[2] < TOL):
             print("Back to start!")
             control_command = [pos[0], pos[1], pos[2], sensor_data['yaw']]
         else:
@@ -322,4 +324,3 @@ def quaternion2rotmat(quaternion):
                     [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x**2 - 2*y**2]])
     
     return R
-        

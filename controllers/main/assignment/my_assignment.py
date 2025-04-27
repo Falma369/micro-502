@@ -22,7 +22,6 @@ import cv2
 # "q_w": W Quaternion value
 
 # A link to further information on how to access the sensor data on the Crazyflie hardware for the hardware practical can be found here: https://www.bitcraze.io/documentation/repository/crazyflie-firmware/master/api/logs/#stateestimate
-TOL = 0.15
 
 def get_command(sensor_data, camera_data, dt):
     # NOTE: Displaying the camera image with cv2.imshow() will throw an error because GUI operations should be performed in the main thread.
@@ -47,33 +46,57 @@ def get_command(sensor_data, camera_data, dt):
         get_command.last_goal = None
     if not hasattr(get_command, "last_yaw_correction"):
         get_command.last_yaw_correction = 0.0
-    # if not hasattr(get_command, "lost_drone"):
-    #     get_command.lost_drone = 0
+    if not hasattr(get_command, "goals_list"):
+        get_command.goals_list = []
+    if not hasattr(get_command, "mode"):
+        get_command.mode = "exploration"  # "exploration" or "navigate"
+    if not hasattr(get_command, "start_position"):
+        get_command.start_position = np.array([sensor_data['x_global'], sensor_data['y_global'], sensor_data['z_global']])
+
+    TOL = 0.15
 
     get_command.counter += 1
-
-    if ((get_command.counter % 10) == 0):
+    if ((get_command.counter % 50) == 0):
         get_command.counter = 0
         previous_info = get_command.actual_info
-
-        if (previous_info is not None):
-            cv2.imshow("prev image: ", previous_info["camera_image"])
+        #if (previous_info is not None):
+        #    cv2.imshow("prev image: ", previous_info["camera_image"])
         get_command.actual_info = {
             "camera_image" : camera_data,
             "drone_position" : np.array([sensor_data['x_global'], sensor_data['y_global'], sensor_data['z_global']]),
             "drone_quaternion" : np.array([sensor_data['q_x'], sensor_data['q_y'], sensor_data['q_z'], sensor_data['q_w']])
         }
+        #cv2.imshow("actual image: ", get_command.actual_info["camera_image"])
 
-        cv2.imshow("actual image: ", get_command.actual_info["camera_image"])
-
-        if previous_info is not None:
+        if previous_info is not None and get_command.mode == "exploration":
+            
             goal, yaw_correction = findGoal(previous_info, get_command.actual_info)
             get_command.last_yaw_correction = yaw_correction
-            print('goal = ', goal)
             if goal is not None and np.all(np.isfinite(goal)):
                 get_command.last_goal = goal
                 get_command.lost_counter = 0
                 get_command.goal_reached = False         # on a une nouvelle cible
+            
+                MARGIN = 2
+
+                is_new = True
+                for saved_goal in get_command.goals_list:
+                    if np.linalg.norm(goal - saved_goal) < MARGIN:
+                        is_new = False
+                        break
+
+                if is_new:
+                    get_command.goals_list.append(goal)
+                    print('f New goal found: ', goal)
+                    print('goal list : ', get_command.goals_list)
+                else:
+                    print('Goal too close to existing one, not stored')
+            if len(get_command.goals_list) >= 5:
+                print("5 goals found! Switching to navigate mode.")
+                get_command.mode = "navigate"
+                get_command.last_goal = get_command.start_position
+                get_command.goal_reached = False
+            
             else:
                 get_command.lost_counter += 1
 
@@ -82,32 +105,38 @@ def get_command(sensor_data, camera_data, dt):
         get_command.lost_counter >= 10           # …et on ne voit plus rien
     )
 
-    if get_command.last_goal is not None:
-        dist_to_goal = np.linalg.norm(
-        np.array([sensor_data['x_global'],
-                  sensor_data['y_global'],
-                  sensor_data['z_global']]) - get_command.last_goal )
-        if dist_to_goal < TOL:
-            get_command.goal_reached = True
+    pos = np.array([sensor_data['x_global'], sensor_data['y_global'], sensor_data['z_global']])
+    
+    if get_command.mode == "exploration": 
+        # Mode recherche des goals
+        if get_command.last_goal is not None:
+            dist_to_goal = pos - get_command.last_goal
+            print ('dist_to_goal= ', dist_to_goal)
+            if (np.abs(pos[0] - get_command.last_goal[0]) < TOL) and (np.abs(pos[1] - get_command.last_goal[1]) < TOL) and (np.abs(pos[2] - get_command.last_goal[2]) < TOL):
+                get_command.goal_reached = True
+                print('goal atteint')
 
-    if get_command.last_goal is not None and not SEARCH_MODE:
-        # print(trapezes_centre)
-        # x_target, y_target = goal[0], goal[1]
-        # control_command = [x_target, y_target, 2.0, sensor_data['yaw']]
-                
-        pos = np.array([sensor_data['x_global'], sensor_data['y_global'], sensor_data['z_global']])
-        adjusted_yaw = sensor_data['yaw'] + get_command.last_yaw_correction
-        
-        control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], adjusted_yaw]
+        if get_command.last_goal is not None and not SEARCH_MODE:      
+            adjusted_yaw = sensor_data['yaw'] + get_command.last_yaw_correction
+            control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], adjusted_yaw]
         # if (get_command.lost_drone == 1):
         #     print('pas d obstacle en vue, je tourne')
         #     control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], adjusted_yaw]
-    else:
-        DRIFT_SPEED = 0.05
-        DRIFT_SPEED_Z = 0.01
-        YAW_STEP    = 0.05
-        
-        control_command = [sensor_data['x_global'] + DRIFT_SPEED, sensor_data['y_global'] + DRIFT_SPEED, sensor_data['z_global'] + DRIFT_SPEED_Z, sensor_data['yaw'] + YAW_STEP]
+        else:
+            DRIFT_SPEED = 0.05
+            DRIFT_SPEED_Z = 0.01
+            YAW_STEP    = 0.05
+            control_command = [pos[0] + DRIFT_SPEED, pos[1] + DRIFT_SPEED, pos[2] + DRIFT_SPEED_Z, sensor_data['yaw'] + YAW_STEP]
+
+    elif get_command.mode == "navigate":
+        # Mode navigation
+        dist_to_start = np.linalg.norm(pos - get_command.start_position)
+        if (np.abs(pos[0] - dist_to_start[0]) < TOL) and (np.abs(pos[1] - dist_to_start[1]) < TOL) and (np.abs(pos[2] - dist_to_start[2]) < TOL):
+            print("Back to start position, ready to start navigation!")
+            control_command = [pos[0], pos[1], pos[2], sensor_data['yaw']]
+        else:
+            control_command = [get_command.start_position[0], get_command.start_position[1], get_command.start_position[2], sensor_data['yaw']]
+
 
     return control_command # Ordered as array with: [pos_x_cmd, pos_y_cmd, pos_z_cmd, yaw_cmd] in meters and radians
 

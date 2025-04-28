@@ -1,6 +1,9 @@
 import numpy as np
 import time
 import cv2
+#import matplotlib.pyplot as plt
+#from scipy.interpolate import interp1d
+from scipy.interpolate import CubicSpline
 
 # The available ground truth state measurements can be accessed by calling sensor_data[item]. All values of "item" are provided as defined in main.py within the function read_sensors. 
 # The "item" values that you may later retrieve for the hardware project are:
@@ -46,13 +49,12 @@ def get_command(sensor_data, camera_data, dt):
         get_command.start_position = np.array([sensor_data['x_global'], sensor_data['y_global'], sensor_data['z_global']])
 
     TOL = 0.1
-    GOAL_SPACEMENT = 0.8
-    #MIN_MOVEMENT = 0.1
+    GOAL_SPACEMENT = 1.0
 
     pos = np.array([sensor_data['x_global'], sensor_data['y_global'], sensor_data['z_global']])
 
     get_command.counter += 1
-    if get_command.counter % 30 == 0:
+    if get_command.counter % 10 == 0:
         get_command.counter = 0
         # Sauvegarder l'ancienne info
         get_command.previous_info = get_command.actual_info
@@ -67,6 +69,7 @@ def get_command(sensor_data, camera_data, dt):
             #if movement > MIN_MOVEMENT:
             goal, yaw_correction = findGoal(get_command.previous_info, get_command.actual_info)
             get_command.last_yaw_correction = yaw_correction
+
 
             if goal is not None and np.all(np.isfinite(goal)):
                 updated = False
@@ -92,7 +95,8 @@ def get_command(sensor_data, camera_data, dt):
         if get_command.last_goal is not None:
             dist = pos - get_command.last_goal
 
-            desired_yaw = np.arctan2(get_command.last_goal[1] - pos[1], get_command.last_goal[0] - pos[0])
+            adjusted_yaw = sensor_data['yaw'] + get_command.last_yaw_correction
+            #desired_yaw = np.arctan2(get_command.last_goal[1] - pos[1], get_command.last_goal[0] - pos[0])
             #yaw_error = desired_yaw - sensor_data['yaw']
             #yaw_error = (yaw_error + np.pi) % (2 * np.pi) - np.pi
 
@@ -101,7 +105,7 @@ def get_command(sensor_data, camera_data, dt):
             if (np.abs(dist[0])< TOL) and (np.abs(dist[1]) < TOL) and (np.abs(dist[2]) < TOL):
                 print("Goal reached!, distance: ", dist)
                 get_command.goal_reached = True
-                control_command = [pos[0], pos[1], pos[2], desired_yaw]
+                control_command = [pos[0], pos[1], pos[2], sensor_data['yaw']]
                 get_command.last_goal = None
 
             #elif np.abs(yaw_error) > YAW_TOL:
@@ -110,29 +114,119 @@ def get_command(sensor_data, camera_data, dt):
             #    control_command = [pos[0], pos[1], pos[2], sensor_data['yaw'] + np.sign(yaw_error) * YAW_CORRECTION_SPEED]
 
             else:
-                #adjusted_yaw = sensor_data['yaw'] + get_command.last_yaw_correction
-                control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], desired_yaw]
+                control_command = [get_command.last_goal[0], get_command.last_goal[1], get_command.last_goal[2], sensor_data['yaw']]
         else:
             # Drift to search
-            DRIFT_SPEED = 0.05
+            DRIFT_SPEED = 0.02
             DRIFT_SPEED_Z = 0.01
             YAW_STEP = 0.05
             control_command = [pos[0] + DRIFT_SPEED, pos[1] + DRIFT_SPEED, pos[2] + DRIFT_SPEED_Z, sensor_data['yaw'] + YAW_STEP]
 
         if len(get_command.goals_list) >= 5 and get_command.goal_reached:
+            #print('voici les goals trouvés: ', get_command.goals_list)
             print("5 goals found. Switching to navigate mode.")
             get_command.mode = "navigate"
+            get_command.goals_list = reorder_goals(get_command.goals_list)
+            #print('liste réarrangée: ', get_command.goals_list)
+            #plot_goals(get_command.goals_list)
             get_command.last_goal = get_command.start_position
 
     elif get_command.mode == "navigate":
-        dist = pos - get_command.start_position
-        if (np.abs(dist[0]) < TOL) and (np.abs(dist[1]) < TOL) and (np.abs(dist[2]) < TOL):
-            print("Back to start!")
-            control_command = [pos[0], pos[1], pos[2], sensor_data['yaw']]
+        if not hasattr(get_command, "trajectory_idx"):
+            # Initialisation à l'entrée du mode navigate
+            get_command.trajectory = generate_trajectory(get_command.goals_list, get_command.start_position, points_per_segment=20)
+            get_command.trajectory_idx = 0
+
+        MARGIN = 0.3
+
+        # Récupérer les points
+        trajectory = get_command.trajectory
+        idx = get_command.trajectory_idx
+
+        if idx < len(trajectory) - 2:
+            target_point = trajectory[idx + 2]
         else:
-            control_command = [get_command.start_position[0], get_command.start_position[1], get_command.start_position[2], sensor_data['yaw']]
+            target_point = trajectory[-1]  # Rester au dernier point pour éviter l'overflow
+
+        actual_point = trajectory[idx]
+
+        # Calcul de la distance actuelle au point actuel (pas au target +2)
+        dist_before_change = np.abs(pos - actual_point)
+
+        if (dist_before_change[0] < MARGIN) and (dist_before_change[1] < MARGIN) and (dist_before_change[2] < MARGIN):
+            print(f"Reached trajectory point {idx+1}/{len(trajectory)}")
+            get_command.trajectory_idx += 1  # Avancer au point suivant
+
+            # Vérifier qu'on ne dépasse pas la trajectoire
+            if get_command.trajectory_idx >= len(trajectory):
+                print("Full trajectory completed! Drone stays at last point.")
+                get_command.trajectory_idx = len(trajectory) - 1  # Bloquer sur le dernier point
+
+        # Toujours viser target_point
+        control_command = [target_point[0], target_point[1], target_point[2], sensor_data['yaw']]
 
     return control_command
+
+def generate_trajectory(goals_list, start_position, points_per_segment=20):
+    """
+    Génère une trajectoire interpolée passant 2x par les gates et retournant au départ.
+
+    Args:
+        goals_list (list of np.array): Liste des positions [x, y, z] des gates.
+        start_position (np.array): Position de départ [x, y, z].
+        points_per_segment (int): Nombre de points interpolés entre chaque pair de points.
+
+    Returns:
+        trajectory (list of np.array): Liste de positions interpolées.
+    """
+
+    # Construction de la séquence des points : 2 passages + retour au start
+    sequence = []
+    for _ in range(2):  # Deux fois
+        for goal in goals_list:
+            sequence.append(goal.copy())
+    sequence.append(start_position.copy())  # Retour au départ
+
+    # Générer des points intermédiaires
+    trajectory = []
+    for i in range(len(sequence)-1):
+        p_start = sequence[i]
+        p_end = sequence[i+1]
+        for alpha in np.linspace(0, 1, points_per_segment, endpoint=False):
+            p_interp = (1-alpha)*p_start + alpha*p_end
+            trajectory.append(p_interp)
+    trajectory.append(sequence[-1])  # Ajouter le dernier point exact
+
+    return trajectory
+
+def reorder_goals(goals_list):
+    """
+    Trie les goals dans le sens trigonométrique autour du centre, 
+    en commençant par celui en bas à droite.
+    """
+    if len(goals_list) != 5:
+        print("Attention: nombre de goals différent de 5")
+        return goals_list
+
+    goals_array = np.array(goals_list)
+    center = np.mean(goals_array[:, :2], axis=0)  # Moyenne en x, y
+
+    # Calculer l'angle de chaque goal par rapport au centre
+    angles = np.arctan2(goals_array[:,1] - center[1], goals_array[:,0] - center[0])
+
+    # Ordonner les angles dans le sens trigonométrique (croissant)
+    sorted_indices = np.argsort(angles)
+
+    # Reorganiser les goals
+    sorted_goals = goals_array[sorted_indices]
+
+    # Maintenant, trouver celui le plus en bas à droite
+    bottom_right_index = np.argmax(sorted_goals[:,0] + sorted_goals[:,1])
+
+    # Décaler pour commencer par celui du bas à droite
+    sorted_goals = np.roll(sorted_goals, -bottom_right_index, axis=0)
+
+    return list(sorted_goals)
 
 def save_image(camera_data, x_global, y_global, z_global, q_x, q_y, q_z, q_w):
     previous_image["camera_image"]: camera_data
@@ -347,3 +441,25 @@ def quaternion2rotmat(quaternion):
                     [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x**2 - 2*y**2]])
     
     return R
+
+##### Fonction debeug : #####
+
+def plot_goals(goals_list):
+    """
+    Affiche la liste des goals en 2D avec matplotlib pour vérifier l'ordre.
+    """
+    goals_array = np.array(goals_list)
+    
+    plt.figure()
+    plt.plot(goals_array[:,0], goals_array[:,1], 'o-', markersize=8, label='Goals Path')
+    
+    for idx, (x, y, _) in enumerate(goals_array):
+        plt.text(x, y, str(idx+1), fontsize=12, ha='right', va='bottom')  # Numérote les points
+    
+    plt.xlabel('X [m]')
+    plt.ylabel('Y [m]')
+    plt.title('Reordered Goals Path')
+    plt.grid(True)
+    plt.axis('equal')
+    plt.legend()
+    plt.show()

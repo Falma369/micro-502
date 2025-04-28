@@ -17,7 +17,7 @@ import threading
 
 exp_num = 4                    # 0: Coordinate Transformation, 1: PID Tuning, 2: Kalman Filter, 3: Motion Planning, 4: Project
 control_style = 'path_planner'      # 'keyboard' or 'path_planner'
-rand_env = False                # Randomise the environment
+rand_env = True                # Randomise the environment
 
 # Global variables for handling threads
 latest_sensor_data = None
@@ -659,9 +659,9 @@ def path_planner_thread(drone):
             new_setpoint = assignment.get_command(sensor_data_copy, camera_data_copy, dt_planner)
             
             camera_data = drone.read_camera()
-            if camera_data is not None:
-                cv2.imshow('ça marche?', camera_data)
-                cv2.waitKey(1) #wait for a key press
+            #if camera_data is not None:
+            #    cv2.imshow('ça marche?', camera_data)
+            #    cv2.waitKey(1) #wait for a key press
 
             with setpoint_lock:
                 current_setpoint = new_setpoint

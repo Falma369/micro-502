@@ -65,13 +65,18 @@ def get_command(sensor_data, camera_data, dt):
         }
 
         if get_command.mode == "exploration" and get_command.previous_info is not None and get_command.goal_reached:
-            #movement = np.linalg.norm(get_command.actual_info["drone_position"] - get_command.previous_info["drone_position"])
-            #if movement > MIN_MOVEMENT:
             goal, yaw_correction = findGoal(get_command.previous_info, get_command.actual_info)
             get_command.last_yaw_correction = yaw_correction
 
-
             if goal is not None and np.all(np.isfinite(goal)):
+                direction_vector = goal - pos
+                norm = np.linalg.norm(direction_vector)
+                if norm != 0:
+                    extension_vector = 0.2 * direction_vector / norm  # 20cm derrière la gate
+                else:
+                    extension_vector = np.array([0, 0, 0])
+                    goal = goal + extension_vector
+
                 updated = False
                 idx = 0
                 # is_new = True
@@ -167,35 +172,44 @@ def get_command(sensor_data, camera_data, dt):
 
     return control_command
 
-def generate_trajectory(goals_list, start_position, points_per_segment=20):
+def generate_trajectory(goals_list, start_position, points_per_segment=10):
     """
-    Génère une trajectoire interpolée passant 2x par les gates et retournant au départ.
+    Génère une trajectoire douce (spline) passant 2x par les gates, en partant du point de départ et retournant au départ.
 
     Args:
         goals_list (list of np.array): Liste des positions [x, y, z] des gates.
         start_position (np.array): Position de départ [x, y, z].
-        points_per_segment (int): Nombre de points interpolés entre chaque pair de points.
+        points_per_segment (int): Nombre de points interpolés entre chaque paire de points.
 
     Returns:
         trajectory (list of np.array): Liste de positions interpolées.
     """
 
-    # Construction de la séquence des points : 2 passages + retour au start
-    sequence = []
-    for _ in range(2):  # Deux fois
+    # Construction de la séquence : départ -> gates 2x -> retour départ
+    sequence = [start_position.copy()]  # 🔵 D'abord le départ
+    for _ in range(2):
         for goal in goals_list:
             sequence.append(goal.copy())
-    sequence.append(start_position.copy())  # Retour au départ
+    sequence.append(start_position.copy())  # 🔵 Retour final au départ
 
-    # Générer des points intermédiaires
+    sequence = np.array(sequence)  # Convertir en numpy array
+
+    # Créer un paramètre "temps" t pour les points clé
+    t = np.linspace(0, 1, len(sequence))
+
+    # Spline interpolation pour chaque coordonnée
+    cs_x = CubicSpline(t, sequence[:, 0], bc_type='natural')
+    cs_y = CubicSpline(t, sequence[:, 1], bc_type='natural')
+    cs_z = CubicSpline(t, sequence[:, 2], bc_type='natural')
+
+    # Générer les points interpolés
+    t_fine = np.linspace(0, 1, points_per_segment * (len(sequence) - 1))
     trajectory = []
-    for i in range(len(sequence)-1):
-        p_start = sequence[i]
-        p_end = sequence[i+1]
-        for alpha in np.linspace(0, 1, points_per_segment, endpoint=False):
-            p_interp = (1-alpha)*p_start + alpha*p_end
-            trajectory.append(p_interp)
-    trajectory.append(sequence[-1])  # Ajouter le dernier point exact
+    for ti in t_fine:
+        x = cs_x(ti)
+        y = cs_y(ti)
+        z = cs_z(ti)
+        trajectory.append(np.array([x, y, z]))
 
     return trajectory
 
